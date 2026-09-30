@@ -1,0 +1,22 @@
+{
+  "criteria": {
+    "hooked": {
+      "trigger": "minecraft:fishing_rod_hooked",
+      "conditions": {
+        "rod": {
+          "items": ["minecraft:fishing_rod"],
+          "predicates": {
+            "minecraft:custom_data": {
+              "dc": {
+                "rod": true
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "rewards": {
+    "function": "doom.consumable:rod/catch"
+  }
+}

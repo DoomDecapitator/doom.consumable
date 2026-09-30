@@ -1,0 +1,10 @@
+{
+  "criteria": {
+    "use": {
+      "trigger": "minecraft:default_block_use"
+    }
+  },
+  "rewards": {
+    "function": "doom.consumable:block/entry"
+  }
+}

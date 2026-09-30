@@ -1,0 +1,38 @@
+{
+  "criteria": {
+    "use": {
+      "trigger": "minecraft:item_used_on_block",
+      "conditions": {
+        "location": [
+          {
+            "condition": "minecraft:all_of",
+            "terms": [
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:chiseled_bookshelf"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:jukebox"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:cauldron"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:composter"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:soul_campfire"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:decorated_pot"}},
+              {"condition":"minecraft:inverted","term":{"condition":"minecraft:block_state_property","block":"minecraft:campfire"}}
+            ]
+          },
+          {
+            "condition": "minecraft:match_tool",
+            "predicate": {
+              "predicates": {
+                "minecraft:custom_data": {
+                  "dc": {
+                    "detect": "place"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "function": "doom.consumable:core/mark_placed"
+  }
+}

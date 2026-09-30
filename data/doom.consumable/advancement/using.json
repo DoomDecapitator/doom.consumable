@@ -1,0 +1,19 @@
+{
+  "criteria": {
+    "using": {
+      "trigger": "minecraft:using_item",
+      "conditions": {
+        "item": {
+          "predicates": {
+            "minecraft:custom_data": {
+              "dc": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "rewards": {
+    "function": "doom.consumable:core/pre_save"
+  }
+}

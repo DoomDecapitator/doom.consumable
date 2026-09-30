@@ -1,0 +1,10 @@
+{
+  "criteria": {
+    "eat": {
+      "trigger": "minecraft:consume_item"
+    }
+  },
+  "rewards": {
+    "function": "doom.consumable:core/mark_consumed"
+  }
+}

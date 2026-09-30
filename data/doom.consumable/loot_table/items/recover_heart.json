@@ -1,0 +1,35 @@
+{
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "item",
+          "name": "minecraft:heart_of_the_sea",
+          "functions": [
+            {
+              "function": "minecraft:set_components",
+              "components": {
+                "minecraft:item_name": {"text": "Recover Heart"},
+                "minecraft:max_stack_size": 1,
+                "minecraft:max_damage": 10,
+                "minecraft:damage": 0,
+                "minecraft:consumable": {"consume_seconds": 0.05, "animation": "none", "has_consume_particles": false},
+                "minecraft:use_cooldown": {"seconds": 5.0, "cooldown_group": "dc.recover_heart"},
+                "minecraft:custom_data": {
+                  "dc": {
+                    "detect": "consume",
+                    "type": "infinite",
+                    "on_use_damage": 10,
+                    "recover": 1,
+                    "recover_ticks": 10
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

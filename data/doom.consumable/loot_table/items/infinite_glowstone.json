@@ -1,0 +1,28 @@
+{
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "item",
+          "name": "minecraft:glowstone",
+          "functions": [
+            {
+              "function": "minecraft:set_components",
+              "components": {
+                "minecraft:item_name": {"text": "Infinite Glowstone"},
+                "minecraft:use_cooldown": {"seconds": 5, "cooldown_group": "dc.infinite"},
+                "minecraft:custom_data": {
+                  "dc": {
+                    "detect": "place",
+                    "type": "infinite"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
