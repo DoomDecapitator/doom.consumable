@@ -29,6 +29,10 @@ function doom.consumable:rod/tick
 # 必须放 snapshot_hand **之前**（同 rod）：扣次先改主手，快照读到的才是扣完次的状态。
 function doom.consumable:shot/tick
 
+# 投掷物消耗链（2026-10-05 P0-1）：雪球 / 鸡蛋 / 末影珍珠 / 经验瓶。
+# 同 shot：必须放 snapshot_hand 之前（扣次若改主手，快照要拍到改完之后的状态）。
+function doom.consumable:throw/tick
+
 # 方块冷却设备：每 5 tick 把到期的「冷却态」方块换回「就绪态」（自带条件，无设备时零成本）
 function doom.consumable:block/tick_restore
 

@@ -1,6 +1,6 @@
 # doom.consumable
 
-统一的「物品使用」框架：**消耗 / 放置 / 丢弃 / 伪耐久条回复 / 鱼竿右键**都在这里，
+统一的「物品使用」框架：**消耗 / 放置 / 丢弃 / 伪耐久条回复 / 鱼竿右键 / 射击 / 投掷**都在这里，
 通过物品身上的 `minecraft:custom_data.dc` 声明，不需要改包。
 
 - 交付对象：地图作者、其它数据包作者（把本包当库用）
@@ -15,17 +15,22 @@
 
 | 字段 | 取值 | 含义 |
 |---|---|---|
-| `detect` | `"consume"` / `"place"` | **必需**：走哪条检测链（吃东西 / 方块放置） |
+| `detect` | `"consume"` / `"place"` / `"shot"` / `"throw"` | **必需**：走哪条检测链（吃东西 / 方块放置 / 射击 / 投掷） |
 | `type` | `"limited"` / `"infinite"` | **必需**：有限次数 / 无限 |
 | `max_uses` / `current_uses` | int | 有限次数的上限与已用次数（配 `max_damage` 显示耐久条，见 lint C4） |
 | `remainder` | 物品 id | 耗尽后给回的物品 |
-| `depleted` | `"disable"` / `"vanish"` | 耗尽后的处置（缺省 = disable） |
+| `depleted` | `"disable"` / `"vanish"` / `"normal"` | 耗尽后的处置（缺省 = disable） |
 | `on_use_damage` | int | 每次使用时给自己造成的伤害 |
 | `recover` / `recover_ticks` | `1b` / int | 伪耐久条：参与回复 / 每格回复所需 tick（默认 10） |
 | `discardable` / `discard_cooldown` | `1b` / int | 可丢弃 / 丢弃冷却（默认 60） |
+| `arrow_refund` | 物品 id | **仅 `detect:"shot"`**：每次发射后补回的弹药（原版消耗、包补回 = infinity 复刻） |
+| `mag` | `1b` | **仅 `detect:"shot"` + 弩**：连发弹匣 —— 射后自动重上膛（见 §五） |
+
+> `detect:"shot"`（弓 / 弩 / 三叉戟）与 `detect:"throw"`（雪球 / 鸡蛋 / 末影珍珠 / 经验瓶）
+> 的**字段语义完全相同**，只有事件源不同；两条链的代码结构**逐行同构**，作者只需学一套。
 
 运行时字段（包自己写，别手填）：`resync`（槽位同步戳）、`rb_cd`（单件回复倒计时）、
-`rod_locked`（鱼竿禁用标记）。
+`rod_locked` / `shot_locked` / `throw_locked`（禁用标记）。
 
 > 给作者：契约的键名审计工具是 `node tools/doomtest/dc_keys.mjs`（拼错键 / 契约漂移一览）。
 
@@ -213,11 +218,38 @@ rod 谓词用**子集匹配**（源码实证的写法：`predicates` 与 `items`
 
 | 命令 | 作用 |
 |---|---|
-| `/function doom.test:consumable` | 跑全部物品套件（含 `consumable_rod`：契约字段 / 四条 API / 闸门 / 状态机） |
+| `/function doom.test:consumable` | 跑全部物品套件（**9 个套件 / 175 断言**，见下） |
 | `/function doom.consumable:test/give_rod` | 拿一把测试鱼竿 |
 | `/function doom.consumable:test/probe_rod` | 打印 `dc.rod_use` / `dc.rod_state` / `dc.rod_catch` 与鱼漂 NBT |
 | `node tools/doomtest/lint.mjs` | 静态检查（含宏参数、守卫判据等规则） |
 | `node tools/doomtest/dc_keys.mjs` | `dc` 契约键名审计（拼错键 / 契约漂移） |
+
+**套件清单（2026-10-12 真机实测 · 1.21.11 · Fabric + Carpet · 假人 + RCON）**：
+
+| 套件 | 断言 | 内容 |
+|---|---|---|
+| `consumable_limited` | 23 | `schedule/limited` 输入输出矩阵（含 F2/F4/F5 回归） |
+| `consumable_detect` | 8 | `consume` 检测链端到端（`pre_save` → 消耗 → `process_usage_wrapper`） |
+| `consumable_restore` | 7 | 恢复链 |
+| `consumable_restore_guard` | 10 | 恢复落点占用守卫（"切槽吞物品"回归） |
+| `consumable_recover` | 22 | 伪耐久条回复驱动 |
+| `consumable_discard` | 8 | 丢弃返还 / 冷却 |
+| `consumable_place` | 26 | 方块放置全链（含快照优先时序） |
+| `consumable_rod` | 16 | 鱼竿接口（契约 / 四条 API / 闸门 / 状态机） |
+| **`consumable_shot`** | **55** | **射击链 + 投掷链 + 连发弹匣**（2026-10-05 新增，此前 **零断言覆盖**） |
+| **合计** | **175** | **175 pass / 0 fail / 加载错误 0** |
+
+> ✅ **2026-10-12 起全绿**。此前长期挂着的那 1 条失败是**夹具缺陷**（用例 G 用 `summon` 造鱼漂，
+> 而鱼漂是 `noSummon` 实体，根本 summon 不出来），**不是产品缺陷** —— 同一钓鱼链在真机假人密集测试中
+> 拿到 11/11 + 3/3 + 21/21。夹具已改成"真抛竿 + 隔 2 刻断言"，见 `CHANGELOG.md` 的 B3。
+
+**`consumable_shot` 覆盖了什么**（55 断言）：弓/弩/三叉戟三武器各自的扣次与写回、
+同 tick stat 跳变只扣一次、三种耗尽模式（vanish / disable / normal）、
+`infinite` 与 `arrow_refund`、`limited` 与 `arrow_refund` 可组合、
+**反向闸门**（弓的 stat 不推动弩 / 鸡蛋的 stat 不推动雪球）、副手兜底、
+非 shot 物品不受影响、`dc.mag` 连发弹匣（含"没有 mag 不许上膛"与"耗尽不许补膛"两条反向闸门）、
+投掷链四条（雪球 / 鸡蛋 / 末影珍珠，含 disable 耗尽）、两个回调挂载点、
+以及 `ctx` 残渣卫生。
 
 **自动化覆盖情况（2026-10-01 真机 E2E，假人 + RCON）**：抛竿/收杆/连续 3 轮计数/按钮模式/api 强收/自愈
 共 **11/11 断言通过**；钓获路径三杆矩阵（dc 杆 / 原版杆 / dc 杆带额外键）**3/3 通过**——
@@ -314,3 +346,56 @@ rod 谓词用**子集匹配**（源码实证的写法：`predicates` 与 `items`
 
 > 实测（同日 · 15 断言全绿）：demo 一条命令搭起来 · 右键 ⇒ 方块变冷却态 ✓ · 冷却中再右键 ⇒ 否决且方块被按回冷却态 ✓ ·
 > 6 秒后自动回到就绪态 ✓ · 冷却结束后可再次激活 ✓ · `debug` 无报错 ✓ · `remove` 先换回就绪态再删 ✓。
+
+---
+
+## 五、射击链与投掷链（2026-10-05 新增）
+
+两条链**结构逐行同构**，差别只在事件源与物品 id 判定方式。
+
+### 5.1 `detect:"shot"` —— 弓 / 弩 / 三叉戟
+
+- **事件源**：原版统计准则 `minecraft.used:minecraft.{bow,crossbow,trident}`
+  ⇒ 引擎只在**投射物真的射出**时 +1（空拉 / 拉不满不涨）⇒ 与鱼竿链同构的"stat 差分"。
+- **扣次 / 写回**：`shot/process_one`（读 `current_uses` → 扣 1 → 写回 `current_uses` 与伪耐久 `damage`）。
+- **三种耗尽模式**：`vanish`（默认，物品消失）/ `disable`（留手 + `shot_locked` + 1 小时 `use_cooldown`）/ `normal`（摘 `dc` 与伪耐久组件 ⇒ 变回普通弓）。
+- **`arrow_refund`**：每发补回指定弹药（原版扣 1、包补 1 = infinity 复刻）。背包满时 `give` 会静默失败（已知限制，不报错）。
+- **主手优先、副手兜底**：两只手都是 shot 武器时**只处理主手**。
+- **回调**：`#doom.consumable:on_shot`（无论扣没扣次都发）。
+
+### 5.2 `dc.mag` —— 无限弩 / 连发弹匣（P0-2）
+
+给弩加一个 `mag:1b` 字段，射完**自动重新上膛** ⇒ 半自动连发。
+
+- **实现要点**：走 `item modify` + `item_modifier/shot_recharge.json`（`set_components` 固定写
+  `charged_projectiles:[1 支箭]`）。因为写入值是**常量**，可以**直接改玩家手持物品**，
+  **不需要** `item_display` 中转体 —— 这是相对 `writeback`（值要运行时算，只能走中转体）的关键简化。
+- **弹药双重补给**：`mag` 补的是**弩膛**（原版射完会清空 `charged_projectiles`），
+  `arrow_refund` 补的是**背包箭**；两者都要有才叫"无限连发"。
+- **边界（已断言）**：没有 `mag` 的弩**不会**被重上膛；弩射到**耗尽那一发**也不补膛（否则耗尽永远到不了）。
+- **射速节流**：建议照 `loot_table/items/repeating_crossbow.json` 挂 `use_cooldown`
+  （示例 0.25 秒/发 ≈ 4 发/秒），并给一个**专属 `cooldown_group`**（否则会连带冷却所有弩）。
+
+### 5.3 `detect:"throw"` —— 雪球 / 鸡蛋 / 末影珍珠 / 经验瓶（P0-1）
+
+- **事件源**：原版统计准则 `minecraft.used:minecraft.{snowball,egg,ender_pearl,experience_bottle}`。
+  > ★ **实测更正**：曾以为"原版没有 `used:snowball` 统计、必须另造事件源"——**该判断不成立**。
+  > 本机 1.21.11 真机三连证：① `scoreboard objectives add probe.snow minecraft.used:minecraft.snowball`
+  > **成功创建**；② 假玩家持雪球连按 5 次 ⇒ 计分板 **5**、背包 16→11；③ 对照组
+  > `minecraft:stick` 连按 3 次 ⇒ **0**（证明是"投掷语义专属"，不是泛化右键计数）。
+  > ⇒ 投掷物**直接复用 shot 链的结构**即可，不需要实体检测 / 进度变体。
+  > （Ragecraft IV 用 `@e[type=snowball]` + tag 分派是给**地图自己 summon 的弹幕**用的，
+  > 那些雪球不经过玩家投掷、自然没有 stat —— 与"玩家扔出去扣次"是两个问题。）
+- **字段**：与 `shot` 完全相同（`type` / `max_uses` / `current_uses` / `depleted`），
+  但没有 `arrow_refund` 与 `mag`（投掷物没有可补回的中介，也没有膛）。
+- **回调**：`#doom.consumable:on_throw`。
+- **发射物**：`loot_table/items/{limited,infinite}_snowball.json` · `limited_ender_pearl.json`。
+
+### 5.4 记分板（只读参考）
+
+| 目标 | 含义 |
+|---|---|
+| `dc.shot_use_{bow,crossbow,trident}` | 准则统计：各武器的累计发射数（事件源） |
+| `dc.shot_prev_*` | 上一 tick 的对应 stat（惰性初始化，别手改） |
+| `dc.throw_use_{snowball,egg,ender_pearl,xp_bottle}` | 准则统计：各投掷物的累计投掷数 |
+| `dc.throw_prev_*` | 同上（惰性初始化） |

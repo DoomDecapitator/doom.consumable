@@ -5,6 +5,14 @@
       "min_inclusive": 48,
       "max_inclusive": 82
     },
+    "min_format": [
+      48,
+      0
+    ],
+    "max_format": [
+      82,
+      0
+    ],
     "description": "§6Doom Consumable §eC1 8.5§r - §fMarker Proxy§r\n§7place/consume/discard/limited/infinite/vanish/disable"
   }
 }

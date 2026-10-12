@@ -1,0 +1,37 @@
+{
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "item",
+          "name": "minecraft:ender_pearl",
+          "functions": [
+            {
+              "function": "minecraft:set_components",
+              "components": {
+                "minecraft:item_name": {
+                  "text": "Limited Ender Pearl"
+                },
+                "minecraft:max_stack_size": 1,
+                "minecraft:max_damage": 5,
+                "minecraft:unbreakable": {
+                  "show_in_tooltip": false
+                },
+                "minecraft:custom_data": {
+                  "dc": {
+                    "detect": "throw",
+                    "type": "limited",
+                    "max_uses": 5,
+                    "current_uses": 5,
+                    "depleted": "vanish"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

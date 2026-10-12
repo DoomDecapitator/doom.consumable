@@ -79,6 +79,22 @@ scoreboard objectives add dc.shot_use_trident minecraft.used:minecraft.trident
 scoreboard objectives add dc.shot_prev_bow dummy
 scoreboard objectives add dc.shot_prev_crossbow dummy
 scoreboard objectives add dc.shot_prev_trident dummy
+# ---- 投掷物消耗链（2026-10-05 P0-1）----
+# ★ 关键实证（推翻了"原版没有 used:snowball"的前置判断）：
+#   `scoreboard objectives add probe.snow minecraft.used:minecraft.snowball` **成功创建**
+#   ⇒ 该准则**存在**；假玩家持雪球连按 5 次 ⇒ 计分板 5、背包 16→11（**真的计数**）；
+#   对照组 stick 连按 3 次 ⇒ 0（证明是"投掷语义专属"，不是泛化右键计数）。
+#   ⇒ 投掷物可以直接复刻 shot 链的 stat 差分结构，**不需要**实体检测 / 进度变体 /
+#     Ragecraft 式的 `@e[type=snowball]` 兜底（那是给"地图自己 summon 的弹幕"用的，问题不同）。
+# 覆盖：雪球 / 鸡蛋 / 末影珍珠 / 经验瓶（四种原版投掷物，stat 均已实测存在）
+scoreboard objectives add dc.throw_use_snowball minecraft.used:minecraft.snowball
+scoreboard objectives add dc.throw_use_egg minecraft.used:minecraft.egg
+scoreboard objectives add dc.throw_use_ender_pearl minecraft.used:minecraft.ender_pearl
+scoreboard objectives add dc.throw_use_xp_bottle minecraft.used:minecraft.experience_bottle
+scoreboard objectives add dc.throw_prev_snowball dummy
+scoreboard objectives add dc.throw_prev_egg dummy
+scoreboard objectives add dc.throw_prev_ender_pearl dummy
+scoreboard objectives add dc.throw_prev_xp_bottle dummy
 scoreboard players set @a dc.off_prev -1
 scoreboard players set @a dc.restore_timer -1
 scoreboard players set @a dc.consume_timer -1
