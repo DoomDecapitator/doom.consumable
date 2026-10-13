@@ -1,0 +1,37 @@
+# 离线静态门（CI）。不需要 Minecraft / Java / 服务器，本机实测 < 2s。
+#
+# 覆盖：
+#   · 全部 .json 可解析（含 pack.mcmeta 与函数标签）
+#   · 每个 .mcfunction 的行级合法性（Brigadier 会拒的写法：行尾注释、连续双空格、`~+N` 坐标、宏行缺占位符）
+#   · 函数引用的闭包（引用的函数/标签都真的存在；跨包引用如 doom.library 放行）
+#   · 泄漏扫描（本机绝对路径 / 开发物标识）
+#   · 仓库顶层白名单
+#
+# 不含：`/reload` 的加载期门、真机断言（需要 Fabric 服务端与 RCON，测试台在私有开发仓库）。
+name: static
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 结构门（泄漏扫描 + 顶层白名单）
+        run: node .github/tools/check_leak.mjs
+
+      - name: 包体可读性（JSON 可解析 + mcfunction 行级合法性 + 引用闭包）
+        run: node .github/tools/check_pack.mjs
+
+      - name: 发行物可复现（dist 的 zip 与现在重新打一次逐字节一致）
+        run: node .github/tools/check_dist.mjs

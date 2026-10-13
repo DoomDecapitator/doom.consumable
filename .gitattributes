@@ -1,0 +1,4 @@
+# 数据包产物按字节比对 ⇒ 一律不做 EOL 转换
+# （包体内含 CRLF 文件（如 block/place_begin、core/mark_placed），必须原样保留，
+#   否则 dist 里的 zip 不再与工作树逐字节相同——check_dist 会红。）
+* -text

@@ -10,6 +10,43 @@
 
 ---
 
+## 2026-10-13 · v0.1.0-beta.2 —— 新增离线静态门 + 修一处宏行缺陷
+
+### 🟢 B5 —— `api/block_cd_config` 的最后一条 tellraw 缺 `$` 前缀
+
+**症状**：`function doom.consumable:api/block_cd_config {tag:"…",seconds:30,…}` 执行后，
+回执里的 `$(tag)` / `$(seconds)` **按字面量原样打印**，不显示实际参数。
+
+**根因**：该行是宏行（同一函数 L18–L22 都用 `$` 前缀），唯独最后一条 `tellraw` 漏了 `$`
+⇒ Brigadier 不做宏替换。**不影响加载**（不是加载期错误），只是回执文本错。
+
+**修**：给该行补 `$` 前缀。
+
+### 🟢 新增 `.github/` 离线静态门（CI）
+
+三个 Node 脚本 + 一个 GitHub Actions workflow，本机 < 2s、不需要 Minecraft：
+
+| 脚本 | 查什么 |
+|---|---|
+| `check_leak.mjs` | 泄漏扫描（本机绝对路径 / 开发物标识）+ 仓库顶层白名单 |
+| `check_pack.mjs` | 每个 `.json` 可解析 + 每个 `.mcfunction` 行级合法性 + 函数引用闭包 |
+| `check_dist.mjs` | `dist/` 的 zip 与工作树**逐字节一致** + sha256 与 `SHA256SUMS.txt` 一致 + 清单覆盖完整 |
+
+门规则按**真机实测**校准（不是照抄范本）：
+
+- `~-N` / `~-0.5` **合法**，只有 `~+N` 被 Brigadier 拒（`Expected double`）⇒ 规则收窄为 `/~\+\d/`
+- `\` 行尾续行的**行首缩进**是排版、合法 ⇒ 双空格规则改测 `line.trim()`
+- `#$(tag)` 是宏标签选择器、不是行尾注释 ⇒ `#` 剥离字符类补 `$`
+- 跨包引用（`doom.library` / `doom.log`）本仓查不到 ⇒ 加 `EXTERNAL` 放行名单
+
+### 🟢 仓库卫生
+
+- 新增 `.gitignore`（本地产物白名单）与 `.gitattributes`（`* -text`：包体内有 2 个 CRLF 文件，
+  必须原样保留，否则 zip 不再逐字节一致）
+- `pack.mcmeta` 的 description 从 `8.5` 更正为 `8.6`
+
+---
+
 ## 2026-10-12 · 鱼漂夹具修复 + mcmeta 字段补齐（回归全绿）
 
 ### 🔴 B3 —— 用例 G 的夹具改成真抛竿（此前它一直在报假失败）

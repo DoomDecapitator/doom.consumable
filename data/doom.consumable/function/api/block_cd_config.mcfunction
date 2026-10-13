@@ -23,4 +23,4 @@ $data modify storage doom.consumable:ctx cfg.cooling set value "$(cooling)"
 execute if data storage doom.consumable:ctx cfg{key:"-"} run data modify storage doom.consumable:ctx cfg.key set from storage doom.consumable:ctx cfg.tag
 data modify storage doom.consumable:block_cd entries append from storage doom.consumable:ctx cfg
 data remove storage doom.consumable:ctx cfg
-tellraw @s [{"text":"[dc] 已加方块冷却配置 ","color":"green"},{"text":"$(tag)","color":"white"},{"text":" · 每 ","color":"gray"},{"text":"$(seconds)","color":"white"},{"text":" 秒","color":"gray"}]
+$tellraw @s [{"text":"[dc] 已加方块冷却配置 ","color":"green"},{"text":"$(tag)","color":"white"},{"text":" · 每 ","color":"gray"},{"text":"$(seconds)","color":"white"},{"text":" 秒","color":"gray"}]

@@ -1,0 +1,27 @@
+# 本地产物（不进仓库）——公开仓库顶层只允许 README.md / LICENSE / CHANGELOG.md
+#   / .gitignore / .gitattributes / pack.mcmeta / data/ / dist/ / docs/ / .github/
+*.log
+harness/
+/_work/
+mcserver/
+mcserver-*/
+**/world/
+**/eula.txt
+**/server.properties
+**/usercache.json
+**/ops.json
+**/banned-*.json
+**/*.jar
+node_modules/
+**/node_modules/
+*.tmp
+*.bak
+*.bak-*
+Thumbs.db
+.DS_Store
+
+# 纵深防御（发布边界审计）
+/reports/
+/tests/
+*.env
+credentials*
