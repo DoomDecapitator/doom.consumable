@@ -1,401 +1,185 @@
-# doom.consumable
+# doom.consumable · 统一的「物品使用」框架
 
-统一的「物品使用」框架：**消耗 / 放置 / 丢弃 / 伪耐久条回复 / 鱼竿右键 / 射击 / 投掷**都在这里，
-通过物品身上的 `minecraft:custom_data.dc` 声明，不需要改包。
-
-- 交付对象：地图作者、其它数据包作者（把本包当库用）
-- 测试入口：`/function doom.test:consumable`（逐套件报告）
-- 依赖：`doom.library`（缓存 / 读写 API）、可选 `doom.log`（并发自检哨兵会上报 E201）
-
----
-
-## 一、物品契约（`dc` 字段）
-
-放在物品组件 `minecraft:custom_data.dc` 里。示例见 `loot_table/items/*.json`。
-
-| 字段 | 取值 | 含义 |
-|---|---|---|
-| `detect` | `"consume"` / `"place"` / `"shot"` / `"throw"` | **必需**：走哪条检测链（吃东西 / 方块放置 / 射击 / 投掷） |
-| `type` | `"limited"` / `"infinite"` | **必需**：有限次数 / 无限 |
-| `max_uses` / `current_uses` | int | 有限次数的上限与已用次数（配 `max_damage` 显示耐久条，见 lint C4） |
-| `remainder` | 物品 id | 耗尽后给回的物品 |
-| `depleted` | `"disable"` / `"vanish"` / `"normal"` | 耗尽后的处置（缺省 = disable） |
-| `on_use_damage` | int | 每次使用时给自己造成的伤害 |
-| `recover` / `recover_ticks` | `1b` / int | 伪耐久条：参与回复 / 每格回复所需 tick（默认 10） |
-| `discardable` / `discard_cooldown` | `1b` / int | 可丢弃 / 丢弃冷却（默认 60） |
-| `arrow_refund` | 物品 id | **仅 `detect:"shot"`**：每次发射后补回的弹药（原版消耗、包补回 = infinity 复刻） |
-| `mag` | `1b` | **仅 `detect:"shot"` + 弩**：连发弹匣 —— 射后自动重上膛（见 §五） |
-
-> `detect:"shot"`（弓 / 弩 / 三叉戟）与 `detect:"throw"`（雪球 / 鸡蛋 / 末影珍珠 / 经验瓶）
-> 的**字段语义完全相同**，只有事件源不同；两条链的代码结构**逐行同构**，作者只需学一套。
-
-运行时字段（包自己写，别手填）：`resync`（槽位同步戳）、`rb_cd`（单件回复倒计时）、
-`rod_locked` / `shot_locked` / `throw_locked`（禁用标记）。
-
-> 给作者：契约的键名审计工具是 `node tools/doomtest/dc_keys.mjs`（拼错键 / 契约漂移一览）。
-
-### 1.1 引擎事实：`consume_seconds` 填 0 会跳过 `using_item`（**本包已支持，但仍默认写 0.05**）
-
-`minecraft:consumable.consume_seconds` 的 codec 用 `ExtraCodecs.NON_NEGATIVE_FLOAT`（**0 是合法值**），
-而 0 会让 `Consumable.use()` 走**另一条分支**（源码 `Consumable.java`）：
-
-```java
-boolean hasDuration = this.consumeTicks() > 0;          // consumeTicks() = (int)(consumeSeconds * 20)
-if (hasDuration) { player.startUsingItem(hand); return InteractionResult.CONSUME; }   // 进入"使用中"态
-else             { this.onConsume(level, player, stack); … }                          // 0 ⇒ 当场消耗
-```
-
-⇒ **填 0 = 瞬间消耗**（实测：`consume_seconds:0` 的金苹果单击一次就被消耗、`consume_item` 触发），
-但它**跳过了 `startUsingItem`** ⇒ ① **`using_item` 触发器不发火**；② 因此"使用前快照"（`core/pre_save`）不会写。
-
-**旧版本（≤2026-09-30）因此不支持 0 秒物品**（表现为"右键直接消失、不计数也不恢复"，lint 规则 C5 曾按 error 拦）。
-**2026-10-01 起已支持**，机制是给消耗奖励补拍快照：
-
-```mcfunction
-# core/mark_consumed（consume_item 的奖励函数）
-advancement revoke @s only doom.consumable:consume
-function doom.consumable:core/pre_save        # ← 关键：在此刻补拍使用快照
-scoreboard players set @s dc.consume_timer 1  # ← 1 tick 后 process_usage_wrapper 照旧处理
-```
-
-之所以可行，是实测确认了**触发时序**：`consume_item` 的奖励函数**早于"扣减"执行** —— 被调用的那一刻手上
-还是**刚被消耗的那件**（`count=N` 未减）。于是 1 tick 后 `process_usage_wrapper` 的差分（N → N-1）照常成立，
-0 秒物品与普通物品**走同一条链**。顺带根治了一个真 bug：快照必定来自"这一次消耗"，不可能再拿
-"上一次起手却没消耗"留下的旧快照张冠李戴（wrapper 另有 `age ≤ 2` 的新鲜度守卫兜底）。
-
-> 端到端实测（金苹果，单击一次）：`0 秒 limited` → `uses 3→2→1→用尽`；`0 秒 infinite` → 被写回手上 ✓。
-
-**本包约定仍默认写 `consume_seconds: 0.05`（= 1 tick）** —— 手感几乎一样，但保留 1 tick 的**可见使用态**
-（`using_item` 与 `consume_item` 两个钩子都响），也避免别人误以为"这物品没被检测到"。
-确有"完全无使用态"需求时填 0 亦可；lint 规则 **C5** 已从 `error` 降为 `warn`（只作提醒）。
-
-> 实测对照（金苹果，单击一次 / 持续 2 秒）：
-> `0.0s` 单击 → `using_item 0 · consume_item 1` · `0.05s` 单击 → 都不动 ·
-> `0.05s` 持续 → `using_item 5 · consume_item 5`（1 tick 一次）。
-> 注：普通食物在**饱食度满**时不消耗（除非 `can_always_eat`），做试验请用金苹果或药水。
-
----
-
-## 二、鱼竿右键接口（2026-09-27 建；**2026-10-01 重设计并端到端验证**）
-
-### 2.1 为什么需要专门的接口
-
-原版鱼竿的"使用"**没有**现成的进度触发器：`item_used_on_block` 不认它（不跟方块交互）、
-`using_item` 也不认它（没有"使用中"时长）、`consume_item` 更不认它（不是消耗品）。
-香草图书馆《常用右键检测》里那三招（胡萝卜钓竿 / 交互实体 / `consumable` 组件）在鱼竿上都用不了：
-胡萝卜钓竿要先换成胡萝卜钓竿那件物品、交互实体是另一个实体、`consumable` 组件的使用行为会被
-`FishingRodItem` 自己的 `use` 覆盖掉。
-
-本接口用三条互相补位的信号把鱼竿右键"显形"：
-
-| 信号 | 来源 | 拿到什么 |
-|---|---|---|
-| ① 统计事件 | 记分板 `dc.rod_use`（准则 `minecraft.used:minecraft.fishing_rod`） | **只代表"抛竿"**（源码实锤：`awardStat` 只在 `FishingRodItem.use` 的抛竿分支，收杆分支零统计） |
-| ② 状态机 | 玩家分数 `dc.rod_state`（0 未抛竿 / 1 钓鱼中） | 现在是不是"在钓" |
-| ③ 鱼漂归属 | 实体 `minecraft:fishing_bobber` + 包内 tag `dc_rod_own_<UUID[0]>` | **这是谁的**鱼漂；它一消失就是一次"收杆"（手动收杆 / 断线 / 被外力消灭都算） |
-
-> **1.21.6 的鱼漂存档里没有 `Owner` 字段**（真机实锤：只有 `Pos/Motion/UUID/Rotation/Tags/Air/…`），
-> 所以归属不能靠 NBT 反查，只能**抛竿时主动打标**：`cast_ok` 把玩家 `UUID[0]` 写进
-> `dc.rod_uid`，再给本刻新出现、离自己最近的鱼漂打 `dc_rod_own_<uid>`。
-> 旧版"靠 `Owner:[I;…]` 匹配"的实现**在 1.21.6 是死代码**（静默失败），已删除。
-
-成功钩取（钓上物品 / 拉回实体）另外接进度触发器 `minecraft:fishing_rod_hooked`。
-rod 谓词用**子集匹配**（源码实证的写法：`predicates` 与 `items` **同级**）：
-
-```json
-"rod": {
-  "items": ["minecraft:fishing_rod"],
-  "predicates": { "minecraft:custom_data": { "dc": { "rod": 1b } } }
-}
-```
-
-> **写法依据（1.21.6 源码，不是猜的）**：`ItemPredicate.CODEC` 的第三个字段是
-> `DataComponentMatchers.CODEC.forGetter(ItemPredicate::components)` —— **没有 `optionalFieldOf("components")` 包装**，
-> 于是 `DataComponentMatchers` 自己的两个字段（`components` = 整组件精确匹配 / `predicates` = 部分匹配）
-> 被**摊平到 ItemPredicate 这一层**。`predicates` 的键是**组件谓词类型 id**（如 `minecraft:custom_data`），
-> 值走 `CustomDataPredicate.CODEC` = `NbtPredicate.CODEC` = `TagParser.LENIENT_CODEC`，即**裸 NBT**，
-> 语义是 **NBT 子集匹配**（`dc` 里多别的键也命中）。
-> **反例（会解析失败，千万别写）**：`{"components":{"predicates":{…}}}` —— `components` 是"组件类型 → 值"的
-> **精确匹配**映射，它会把 `predicates` 当成组件类型名去查注册表，报
-> `Unknown registry key … data_component_type: minecraft:predicates`。
+> ⚠️ **Beta 声明（请先读这一段）**
 >
-> `rod/catch` 顶部另有一条 `if data … dc{rod:1b}` 守卫作**双保险**：谓词被改错时还能兜住。
-> 本项目在 1.21.5 → 1.21.6 迁移时就曾被静默改错过一次，特征是**功能整体失效但没有任何报错**。
-
-### 2.2 怎么给自己的鱼竿接上
-
-1. 物品加一个字段就行：`minecraft:custom_data.dc.rod = 1b`（完整示例：`loot_table/items/test_rod.json`）
-2. 需要扩展就在回调标签里写逻辑（见 2.6）；需要"用不了"就选 2.4 的三个入口之一
-3. 拿到测试鱼竿：`/function doom.consumable:test/give_rod`；现场核对：`/function doom.consumable:test/probe_rod`
-
-### 2.3 鱼竿专用字段
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `rod` | `1b` | **必需**：标记这件物品参与接口（没有它，接口完全不理它） |
-| `rod_locked` | `1b` | 运行时禁用标记（`api/rod_disable` 写、`api/rod_enable` 清） |
-| `rod_clear_durability` | `1b` | 成功钩取后把耐久清空（满格）—— "使用后耐久清空"这类需求写这一个字段即可 |
-| `rod_button` | `1b` | **按钮模式**：一次右键 = 抛竿后立刻收回（只发 `on_rod_cast`，不发 `on_rod_reel`）—— 把鱼竿当"触发型物品"用 |
-| `rod_deny_message` | string | 被否决时显示的文本（红色，裸文本不带引号） |
-| `rod_deny_sound` | string | 被否决时播放的音效 id，例 `minecraft:block.note_block.bass` |
-
-### 2.4 禁用（什么时候不能用鱼竿）—— 三个入口
-
-| 入口 | 形式 | 适用 |
-|---|---|---|
-| 静态名单 | 物品标签 `#doom.consumable:rod_locked` | 某几件鱼竿（或整个 `minecraft:fishing_rod`）永久不能用 |
-| 动态开关 | `api/rod_disable` / `api/rod_enable` | 状态跟着**物品**走，可随时开关 |
-| 条件钩子 | 函数标签 `#doom.consumable:rod_gate` | 按**玩家状态**判断（血量、区域、效果……）：在里面 `scoreboard players set #rod_deny dc.temp 1` 即否决 |
-
-**两道防线**（为什么这么设计）：
-
-- **软否决**：原版没有"使用前"钩子，所以接口在**同一个服务器 tick 内**把刚抛出来的鱼漂收回
-  （玩家交互包在 tick 最前处理、本逻辑在 tick 后段运行）⇒ 玩家看不到鱼漂、拿不到任何产物，等效"没抛"。
-- **硬禁用**：被禁用的鱼竿会自动挂上 `minecraft:use_cooldown`（时长 `#rod_lock dc.cfg` 秒，默认 10，到期自动续）
-  ⇒ 原版直接拦住"使用"，热键栏显示灰条 —— 玩家**看得见**"现在不能用"。
-
-### 2.5 API 一览（对外可用，参数必须写全）
-
-| 函数 | 参数 | 作用 |
-|---|---|---|
-| `doom.consumable:api/rod_durability` | `{value:<int>}` | 设置手持鱼竿的 `damage`（**0 = 满耐久**） |
-| `doom.consumable:api/rod_durability_add` | `{value:<int>}` | 加减损耗（可负；不会低于 0） |
-| `doom.consumable:api/rod_disable` | — | 禁用执行者手上的鱼竿（写 `rod_locked` + 挂冷却） |
-| `doom.consumable:api/rod_enable` | — | 解除禁用（清 `rod_locked` 与 `use_cooldown`） |
-| `doom.consumable:api/rod_reel` | — | 强制收回执行者自己的鱼漂（打断钓鱼，无回调） |
-| `doom.consumable:api/rod_casting` | — | 查询执行者是否在钓：结果写进 `#casting dc.temp`（1 = 正在） |
-
-> 全部要求**执行者是玩家本人**（写回靠 `item replace entity @s …`）。
-> 宏函数（带 `{…}` 的那两个）**必须带参数**：缺参数时整次调用会被静默放弃（引擎行为，本项目已钉）。
-
-### 2.6 回调标签（第三方挂载点）
-
-| 标签 | 触发时机 |
-|---|---|
-| `#doom.consumable:on_rod_cast` | 抛竿放行（每抛一次恰好 1 次） |
-| `#doom.consumable:on_rod_reel` | 钓鱼结束且玩家仍手持鱼竿（手动收杆 / 断线 / 鱼漂被外力消灭） |
-| `#doom.consumable:on_rod_catch` | 成功钩取（钓上物品 / 拉回实体）—— catch ⊂ reel：钩取后紧接着也会发一次 reel |
-| `#doom.consumable:on_rod_denied` | 抛竿被否决 |
-
-> `api/rod_reel` 是**中断语义**：它收回鱼漂但**不发** `on_rod_reel`（调用方自己知道是自己干的），
-> 且不触发耐久/掉落/拉实体等原版收杆副作用。
-
-### 2.7 记分板（只读参考 / 可调）
-
-| 目标 | 含义 |
-|---|---|
-| `dc.rod_use` | 准则统计，每玩家"**抛竿**"累计次数（接口的事件源；收杆不计数） |
-| `dc.rod_prev` | 接口内部用：上一 tick 的 `dc.rod_use`（别手改） |
-| `dc.rod_state` | 0 = 未抛竿，1 = 钓鱼中 |
-| `dc.rod_uid` | 接口内部用：玩家 `UUID[0]`（归属标签的钥匙，抛竿时缓存） |
-| `dc.rod_catch` | 成功钩取累计次数 |
-| `#rod_lock dc.cfg` | 锁定鱼竿续期的冷却秒数（默认 10） |
-
-### 2.8 原版行为与坑（作者实测/官方来源）
-
-- `use_cooldown` **对鱼竿有效**（Mojira [MC-275882](https://mojira.dev/MC-275882) 报的就是鱼竿的冷却行为），
-  但**不拦方块交互**（[MC-275796](https://mojira.dev/MC-275796)）—— 与本接口无关，鱼竿不跟方块交互。
-- 鱼竿只在**收杆且钩到东西**时掉耐久，空收杆不掉（相关现象见 [MC-101033](https://mojira.dev/MC-101033)）；
-  所以"用一次掉一点耐久"这类规则请写在回调里调用 `api/rod_durability_add`。
-- `fishing_rod_hooked` 只在**成功钩取**时触发（钓上物品 / 拉回实体），空收杆不触发。
-- 鱼漂消失 ≠ 玩家收杆：死亡 / 换维度 / 超时都会让它消失。接口用"自己的鱼漂没了 ⇒ 状态自愈"处理，
-  但**只要玩家此刻还手持鱼竿**就判为一次真收杆（发 `on_rod_reel`）；没手持则静默归零（不发回调）。
-- `api/rod_reel` 靠鱼漂身上的 tag `dc_rod_own_<uid>` 定位（**不是** NBT `Owner` 字段 ——
-  1.21.6 的鱼漂存档里根本没有这个字段）。tag 在抛竿那一刻打上，随实体走。
-- 边界：把鱼漂抛进**未加载（非实体 tick）区块**时归属打标会落空 ⇒ 会出现一次"抛竿后 1 刻的幽灵收杆"。
-  真人视距 ≥2 时不会遇到（这是假人测试环境的产物）。
-
-### 2.9 参考
-
-- 香草图书馆《常用右键检测》（CR_019）：<https://vanillalibrary.mcfpp.top/datapack-index/resources/dust/3/常用右键检测.html>
-  —— 三种通用右键检测法（胡萝卜钓竿 / 交互实体 / `consumable` 组件），**都不适用于鱼竿**，原因见 2.1。
-- 官方结构：`minecraft:fishing_rod_hooked` 触发器的条件为 `entity`（被拉回的实体或鱼漂）、
-  `item`（钓到的物品）、`rod`（用的鱼竿）。
+> 本数据包目前处于**中期制作的 Beta 阶段**：功能与格式**都可能继续变动**，
+> 文档**内容仅供参考**，不保证稳定、不保证向后兼容。
+> 安装或升级前请**备份你的存档**。如果它弄坏了什么，Beta 阶段我们不作承诺。
+>
+> 欢迎试用与反馈，但请把它当「正在做的东西」，而不是「已经定稿的产品」。
 
 ---
 
-## 三、测试与自检
+## 这是什么？
 
-| 命令 | 作用 |
-|---|---|
-| `/function doom.test:consumable` | 跑全部物品套件（**9 个套件 / 175 断言**，见下） |
-| `/function doom.consumable:test/give_rod` | 拿一把测试鱼竿 |
-| `/function doom.consumable:test/probe_rod` | 打印 `dc.rod_use` / `dc.rod_state` / `dc.rod_catch` 与鱼漂 NBT |
-| `node tools/doomtest/lint.mjs` | 静态检查（含宏参数、守卫判据等规则） |
-| `node tools/doomtest/dc_keys.mjs` | `dc` 契约键名审计（拼错键 / 契约漂移） |
+一句话：**给它一件物品，它帮你管住这件物品「被右键使用」的全过程。**
 
-**套件清单（2026-10-12 真机实测 · 1.21.11 · Fabric + Carpet · 假人 + RCON）**：
+你平时玩的 Minecraft 里，一件物品右键下去无非就是吃掉、放下去、或者射出去。
+这些东西要在数据包里自己做，得写一大堆检测逻辑，还很容易漏掉边角情况。
 
-| 套件 | 断言 | 内容 |
+这个包把这件事**做成了一套现成的框架**。你不需要改这个包的代码，
+只要在自己的物品上写一小段声明（一段叫 `dc` 的标记），
+就自动获得「用了几次、什么时候用完、用完变什么」这一整套行为。
+
+它管的是这些动作：
+
+**吃掉 / 喝掉 · 放下方块 · 丢出去 · 用一次掉一格耐久并随时间自己修回来 ·
+鱼竿右键 · 弓弩三叉戟射击 · 雪球鸡蛋末影珍珠经验瓶投掷**
+
+---
+
+## 装了能干什么（功能速览）
+
+下面用普通玩家的说法说一遍，不涉及任何技术名词。示例物品都能在
+`data/doom.consumable/loot_table/items/` 里找到。
+
+| 你想做的事 | 实际效果 | 示例物品文件 |
 |---|---|---|
-| `consumable_limited` | 23 | `schedule/limited` 输入输出矩阵（含 F2/F4/F5 回归） |
-| `consumable_detect` | 8 | `consume` 检测链端到端（`pre_save` → 消耗 → `process_usage_wrapper`） |
-| `consumable_restore` | 7 | 恢复链 |
-| `consumable_restore_guard` | 10 | 恢复落点占用守卫（"切槽吞物品"回归） |
-| `consumable_recover` | 22 | 伪耐久条回复驱动 |
-| `consumable_discard` | 8 | 丢弃返还 / 冷却 |
-| `consumable_place` | 26 | 方块放置全链（含快照优先时序） |
-| `consumable_rod` | 16 | 鱼竿接口（契约 / 四条 API / 闸门 / 状态机） |
-| **`consumable_shot`** | **55** | **射击链 + 投掷链 + 连发弹匣**（2026-10-05 新增，此前 **零断言覆盖**） |
-| **合计** | **175** | **175 pass / 0 fail / 加载错误 0** |
+| **限量使用的消耗品** | 比如一个苹果能吃 5 次，吃完变成金苹果。物品栏里会显示一条耐久条代表还剩几次 | `limited_apple.json` |
+| **无限使用的消耗品** | 随便吃，永远用不完。可以设定「每次使用给自己一点伤害」之类的代价 | `infinite_apple.json` |
+| **用完就消失 / 用完就坏掉** | 用光之后有三种收场：直接消失、留在手里但锁死不能再碰、或者干脆变回一件普通物品 | `vanish_apple.json` · `disable_apple.json` · `normal_bow.json` |
+| **用完返还一个东西** | 用尽之后手上换成另一件物品（比如苹果吃完剩个核） | `remainder_apple.json` |
+| **限量放置的方块** | 像放方块一样放 5 次，放完变回一撮粉末。按住右键连放也不会漏数 | `limited_glowstone.json` |
+| **能丢的东西** | 把物品丢出去会有响应，并带一个丢弃冷却（默认 60 刻） | `discard_glowstone.json` |
+| **会自己修回来的耐久条** | 用一次掉一格，**停下来不动时会一格一格自己回满**。像呼吸一样 | `recover_heart.json` |
+| **鱼竿右键接口** | 给鱼竿接上抛竿 / 收杆 / 钓到东西的事件，能按玩家状态禁用，也能做成「按一下立刻收回」的按钮型物品 | `test_rod.json` |
+| **射击扣次** | 弓 / 弩 / 三叉戟**真的射出**才扣一次。可以顺带补回箭（相当于无限箭），也可以做三种耗尽结局 | `limited_bow.json` · `infinite_bow.json` |
+| **弩 · 连发弹匣** | 给弩加一个标记，射完**自动重新上膛**，配合补箭就是半自动无限连发 | `repeating_crossbow.json` |
+| **投掷扣次** | 雪球 / 鸡蛋 / 末影珍珠 / 经验瓶，扔一个扣一次 | `limited_snowball.json` · `limited_ender_pearl.json` |
+| **方块使用冷却** | 给**一个方块**加冷却：冷却没好时右键会被拦下，还能让方块在「就绪 / 冷却」两种外观之间自动切换（用拉杆、铜灯这类原生方块当载体） | `api/block_cd_demo` 一条命令就能搭起来 |
 
-> ✅ **2026-10-12 起全绿**。此前长期挂着的那 1 条失败是**夹具缺陷**（用例 G 用 `summon` 造鱼漂，
-> 而鱼漂是 `noSummon` 实体，根本 summon 不出来），**不是产品缺陷** —— 同一钓鱼链在真机假人密集测试中
-> 拿到 11/11 + 3/3 + 21/21。夹具已改成"真抛竿 + 隔 2 刻断言"，见 `CHANGELOG.md` 的 B3。
-
-**`consumable_shot` 覆盖了什么**（55 断言）：弓/弩/三叉戟三武器各自的扣次与写回、
-同 tick stat 跳变只扣一次、三种耗尽模式（vanish / disable / normal）、
-`infinite` 与 `arrow_refund`、`limited` 与 `arrow_refund` 可组合、
-**反向闸门**（弓的 stat 不推动弩 / 鸡蛋的 stat 不推动雪球）、副手兜底、
-非 shot 物品不受影响、`dc.mag` 连发弹匣（含"没有 mag 不许上膛"与"耗尽不许补膛"两条反向闸门）、
-投掷链四条（雪球 / 鸡蛋 / 末影珍珠，含 disable 耗尽）、两个回调挂载点、
-以及 `ctx` 残渣卫生。
-
-**自动化覆盖情况（2026-10-01 真机 E2E，假人 + RCON）**：抛竿/收杆/连续 3 轮计数/按钮模式/api 强收/自愈
-共 **11/11 断言通过**；钓获路径三杆矩阵（dc 杆 / 原版杆 / dc 杆带额外键）**3/3 通过**——
-含"原版杆不发 `on_rod_catch`"这条**反向闸门证明**。全量报告见 `doom.nats/reports/研究-rod接口重设计-20261001.md`。
-
-**尚未被自动化覆盖**（需要真人操作，用 `probe_rod` 核对）：物品标签 `#doom.consumable:rod_locked`
-的实际拦截手感、真人视距下的钓鱼体感。
+> 有些物品天生就是「用一次少一点」的消耗品，有些是「永远用不完」的钥匙。
+> 这两类是这个框架里最基础的分支，几乎所有示例都是在它们上面加减改出来的。
 
 ---
 
-## 四、方块冷却设备（2026-10-01 新增）
+## 谁会用这个包
 
-给「一个方块」做使用冷却。原版没有方块组件 —— 冷却只存在于物品（`use_cooldown` 组件）与玩家侧，
-所以这里用**挂在方块上的 marker 实体**当设备：配置与到期刻都存在它身上（跨 reload / 重启存活）。
-
-### 4.1 三十秒上手
-
-1. 站在目标方块上，执行 `function doom.consumable:api/block_cd_place` ⇒ 该方块装上设备；
-2. 之后任何人对它做「方块交互」都会过闸：
-   · 已到期 ⇒ 触发 `#doom.consumable:on_block_use`（第三方在这里做真正的效果）；
-   · 冷却中 ⇒ 触发 `#doom.consumable:on_block_denied`（读 storage `doom.consumable:ctx block.left` = 剩余 tick）；
-3. 状态 / 立即就绪 / 移除：`api/block_cd_status` · `api/block_cd_reset` · `api/block_cd_remove`。
-
-### 4.2 设备字段（marker 的 `data.dc`）
-
-| 键 | 含义 |
-|---|---|
-| `cd_seconds` | 冷却秒数（默认 5） |
-| `cd_ready` | 下次可用的游戏刻（0 = 随时可用；放行时写回 now + seconds*20） |
-| `cd_key` | 设备名，回调里从 storage `doom.consumable:ctx block.key` 读 |
-| `cd_count` | 已激活次数（模块累加，便于观测或做次数限制） |
-| `cd_deny_msg` / `cd_deny_sound` | 可选：否决时的聊天栏文本 / 音效 |
-
-### 4.3 入口与外部钩子
-
-- 入口进度：`block_use.json`（`item_used_on_block`）+ `block_use_empty.json`（`default_block_use`，空手也管）
-  ⇒ 两条都指向 `doom.consumable:block/entry`。
-- 钩子：`#doom.consumable:block_gate`（写 `#block_deny dc.temp 1` 即强制否决）·
-  `#doom.consumable:on_block_use` · `#doom.consumable:on_block_denied`。
-
-### 4.4 怎么找到「被交互的那个方块」
-
-原版触发器**不给奖励函数**方块坐标（条件里的 `location` 只用于过滤，函数读不到）⇒
-`block/entry` 用「从**眼睛**沿视线每 0.25 格推进、最多 20 步（5 格）」的射线找设备。
-
-⚠ 必须 `anchored eyes`：`run function` 的上下文是玩家**脚底**，直接用会从脚底射出，
-几格之外就落到设备下方 —— 开发时实测踩过（守卫通过、却永远命中不了，hit 恒 0）。
-⚠ 射线只认本包设备、**不认墙**：隔着墙 5 格内的设备也会被认到（本模块是「设备闸门」，不是物理射线判定）。
-
-### 4.5 能力边界（诚实说明）
-
-方块交互没有「使用前钩子」⇒ **方块自己的行为已经发生了**（箱子开了、按钮按了）。
-本模块只做「冷却判定 + 回调」；要不要撤销 / 惩罚 / 换方块状态，由回调决定。
-若要「根本按不动」，数据包层面做不到，只能靠方块自身状态（例如 `setblock` 换成另一种方块）。
-
-> 实测（2026-10-01 · 14 断言全绿）：物品路径首次放行（`cd_ready` 差 61 tick ✓、`cd_count` 1→2）·
-> 冷却中再交互否决 ✓ · 等 3.5 秒后再放行 ✓ · 外部闸门强制否决 ✓ · 空手路径同样进闸 ✓ ·
-> `reset` / `remove` API ✓。两条入口进度的触发都实测过：`item_used_on_block`（放火把）与 `default_block_use`（空手扳拉杆）。
-
-### 4.6 冷却态外观：直接换方块（可选，2026-10-01 追加）
-
-设备可以声明两个方块形态，模块会在冷却开始/结束时自动 `setblock`：
-
-| 字段 | 含义 |
-|---|---|
-| `cd_block_ready` | 就绪时的方块状态串，例 `minecraft:lever[face=floor,powered=false]` |
-| `cd_block_cooling` | 冷却中的方块状态串，例 `minecraft:lever[face=floor,powered=true]` |
-
-时间线：放行 ⇒ 换 `cooling` · 到期 ⇒ `block/tick_restore`（每 5 tick 扫一遍设备）换回 `ready` ·
-被否决 ⇒ **重新按回 `cooling`** · `api/block_cd_remove` ⇒ **无条件**换回 `ready` 再删设备。
-
-⚠ 两个坑（2026-10-01 实测）：
-
-1. **方块自身的交互会改自己的状态**（拉杆 `powered`、活板门 `open`…）⇒ 否决时必须重按一次，
-   否则外观会说谎（显示「就绪」而逻辑仍在冷却）。
-2. 移除设备**不能**复用「到期换回」的逻辑（它带到期判定）⇒ 没到期就删会留下永久冷却态；
-   所以 `api/block_cd_remove` 用 `block/force_ready`（无条件的那个）。
-
-> 📄 **技术档案**（设计·引擎取证·41 断言实测·踩坑清单·移植指引·可选扩展）：
-> `docs/技术档案-方块冷却闸门-20261001.md`
-
-### 4.7 原型与调试（2026-10-01 追加）
-
-- `api/block_cd_demo` —— 一条命令：[脚下那块方块] 换成拉杆 + 装设备（5 秒冷却 + 否决提示）。
-  ① 右键 ⇒ 拉杆抬起、开始冷却 ② 冷却中再右键 ⇒ 被否决（拉杆被按回）③ 5 秒后自动放下 ④ 拆掉用 `api/block_cd_remove`。
-- `api/block_cd_debug` —— 16 格内每台设备打状态粒子（**绿=就绪 / 红=冷却中**）+ 打印统计与每台明细。
-- `api/block_cd_status|reset|remove` —— 单台设备的状态 / 立即就绪 / 移除。
-
-> **关于「对齐模型」**：`item_model` / `custom_model_data` 是**物品**组件（物品靠它们换外观）；
-> **方块**没有组件通道 —— 方块的样子由资源包的 `assets/<ns>/blockstates/<方块>.json` 按**方块状态**决定。
-> 所以「方块冷却换外观」的标准做法就是本节的形态切换：挑一个**带布尔状态**的原版方块当载体
-> （拉杆 `powered` / 铜灯 `lit` / 活板门 `open` …），资源包里给两个状态各自配模型 ⇒ 视觉与逻辑都对齐。
-> 数据包本身**不能新增方块**，只能在这些已存在的状态之间切换。
-
-> 实测（同日 · 15 断言全绿）：demo 一条命令搭起来 · 右键 ⇒ 方块变冷却态 ✓ · 冷却中再右键 ⇒ 否决且方块被按回冷却态 ✓ ·
-> 6 秒后自动回到就绪态 ✓ · 冷却结束后可再次激活 ✓ · `debug` 无报错 ✓ · `remove` 先换回就绪态再删 ✓。
+- **地图作者**：给自定义物品加上「吃几次 / 放几次 / 射几次」的规则，不用重写检测逻辑。
+- **其它数据包作者**：把本包当**库**来调用，只需要在自己物品上写声明。
+- **直接玩的玩家**：也可以直接把它当玩法包装进存档，用示例物品体验。
 
 ---
 
-## 五、射击链与投掷链（2026-10-05 新增）
+## 安装
 
-两条链**结构逐行同构**，差别只在事件源与物品 id 判定方式。
+1. **准备两个包**。本包依赖 `doom.library`（必需），它是提供数据读写的公共基础库，
+   没有它本包跑不起来：
+   - `doom.consumable`（本包）
+   - `doom.library`（<https://github.com/DoomDecapitator/doom.library>）
+   - 可选：`doom.log`。装上它，框架的**并发自检哨兵**在发现问题时会向上报一条 `E201`；
+     不装也能正常玩，只是这类提醒无处可去。
 
-### 5.1 `detect:"shot"` —— 弓 / 弩 / 三叉戟
+2. **放进存档的 `datapacks` 目录**。两个（或三个）包都要放在**同一个**目录下：
 
-- **事件源**：原版统计准则 `minecraft.used:minecraft.{bow,crossbow,trident}`
-  ⇒ 引擎只在**投射物真的射出**时 +1（空拉 / 拉不满不涨）⇒ 与鱼竿链同构的"stat 差分"。
-- **扣次 / 写回**：`shot/process_one`（读 `current_uses` → 扣 1 → 写回 `current_uses` 与伪耐久 `damage`）。
-- **三种耗尽模式**：`vanish`（默认，物品消失）/ `disable`（留手 + `shot_locked` + 1 小时 `use_cooldown`）/ `normal`（摘 `dc` 与伪耐久组件 ⇒ 变回普通弓）。
-- **`arrow_refund`**：每发补回指定弹药（原版扣 1、包补 1 = infinity 复刻）。背包满时 `give` 会静默失败（已知限制，不报错）。
-- **主手优先、副手兜底**：两只手都是 shot 武器时**只处理主手**。
-- **回调**：`#doom.consumable:on_shot`（无论扣没扣次都发）。
+   ```
+   <你的存档>/datapacks/doom.consumable/
+   <你的存档>/datapacks/doom.library/
+   ```
 
-### 5.2 `dc.mag` —— 无限弩 / 连发弹匣（P0-2）
+   也就是每个包目录里应该直接看到 `pack.mcmeta` 和 `data/`。
 
-给弩加一个 `mag:1b` 字段，射完**自动重新上膛** ⇒ 半自动连发。
+3. **在游戏里加载**。进入世界后执行 `/reload`。用 `/datapack list` 应该能看到这两个包是启用的。
 
-- **实现要点**：走 `item modify` + `item_modifier/shot_recharge.json`（`set_components` 固定写
-  `charged_projectiles:[1 支箭]`）。因为写入值是**常量**，可以**直接改玩家手持物品**，
-  **不需要** `item_display` 中转体 —— 这是相对 `writeback`（值要运行时算，只能走中转体）的关键简化。
-- **弹药双重补给**：`mag` 补的是**弩膛**（原版射完会清空 `charged_projectiles`），
-  `arrow_refund` 补的是**背包箭**；两者都要有才叫"无限连发"。
-- **边界（已断言）**：没有 `mag` 的弩**不会**被重上膛；弩射到**耗尽那一发**也不补膛（否则耗尽永远到不了）。
-- **射速节流**：建议照 `loot_table/items/repeating_crossbow.json` 挂 `use_cooldown`
-  （示例 0.25 秒/发 ≈ 4 发/秒），并给一个**专属 `cooldown_group`**（否则会连带冷却所有弩）。
+4. **版本要求**。以本包 `pack.mcmeta` 的声明为准，当前是：
 
-### 5.3 `detect:"throw"` —— 雪球 / 鸡蛋 / 末影珍珠 / 经验瓶（P0-1）
+   - `pack_format` = **81**
+   - `supported_formats` = **48 ~ 82**（含两端）
+   - 另有 `min_format` = `[48, 0]`、`max_format` = `[82, 0]`
 
-- **事件源**：原版统计准则 `minecraft.used:minecraft.{snowball,egg,ender_pearl,experience_bottle}`。
-  > ★ **实测更正**：曾以为"原版没有 `used:snowball` 统计、必须另造事件源"——**该判断不成立**。
-  > 本机 1.21.11 真机三连证：① `scoreboard objectives add probe.snow minecraft.used:minecraft.snowball`
-  > **成功创建**；② 假玩家持雪球连按 5 次 ⇒ 计分板 **5**、背包 16→11；③ 对照组
-  > `minecraft:stick` 连按 3 次 ⇒ **0**（证明是"投掷语义专属"，不是泛化右键计数）。
-  > ⇒ 投掷物**直接复用 shot 链的结构**即可，不需要实体检测 / 进度变体。
-  > （Ragecraft IV 用 `@e[type=snowball]` + tag 分派是给**地图自己 summon 的弹幕**用的，
-  > 那些雪球不经过玩家投掷、自然没有 stat —— 与"玩家扔出去扣次"是两个问题。）
-- **字段**：与 `shot` 完全相同（`type` / `max_uses` / `current_uses` / `depleted`），
-  但没有 `arrow_refund` 与 `mag`（投掷物没有可补回的中介，也没有膛）。
-- **回调**：`#doom.consumable:on_throw`。
-- **发射物**：`loot_table/items/{limited,infinite}_snowball.json` · `limited_ender_pearl.json`。
+   本包已在 **Minecraft 1.21.11** 上跑通完整回归套件（见下一节）。
+   装到别的版本前，请先核对你的游戏版本落在上面的区间内。
 
-### 5.4 记分板（只读参考）
+---
 
-| 目标 | 含义 |
-|---|---|
-| `dc.shot_use_{bow,crossbow,trident}` | 准则统计：各武器的累计发射数（事件源） |
-| `dc.shot_prev_*` | 上一 tick 的对应 stat（惰性初始化，别手改） |
-| `dc.throw_use_{snowball,egg,ender_pearl,xp_bottle}` | 准则统计：各投掷物的累计投掷数 |
-| `dc.throw_prev_*` | 同上（惰性初始化） |
+## 跑一下测试
+
+本包自带一套自动化回归。装好 `doom.test` 后，在游戏里执行：
+
+```
+/function doom.test:consumable
+```
+
+它会逐个套件上报结果。当前是 **9 个套件 / 175 条断言**，
+**判定结果请用 RCON 直读计分板 `#pass` / `#fail` / `#calls dt.test`**——
+套件用 `tellraw` 上报，**不会写进服务端日志**，光看日志会以为什么都没发生。
+
+> 现状：**2026-10-12 起 175/175 全绿**（1.21.11 实测）。
+> 此前长期挂着的那 1 条失败是**测试夹具自身的缺陷**（它试图用命令直接生成鱼漂，
+> 而鱼漂在当前版本是禁止 `summon` 的实体），**不是产品问题**，夹具已改。
+
+---
+
+## 给数据包作者（进阶）
+
+真正的技术细节**不在这个 README 里**，已经整份下沉到
+**[`docs/技术手册-物品契约与实现.md`](docs/技术手册-物品契约与实现.md)**。
+
+那份手册里写着：完整的 `dc` 字段契约表、鱼竿接口的四条 API 与四个回调标签、
+方块冷却设备的字段与钩子、射击链／投掷链的记分板、以及逐条标了出处的引擎事实与踩坑记录。
+**要动手改行为，请以那份为准。**
+
+这里只留最常用的几条，让你先跑起来：
+
+- **声明写在哪**：物品组件的 `minecraft:custom_data.dc` 里。
+- **两个必填字段**：`detect`（走哪条检测链：`"consume"` 吃 / `"place"` 放 / `"shot"` 射 / `"throw"` 投）
+  和 `type`（`"limited"` 有限次 / `"infinite"` 无限）。
+- **次数**：`max_uses` 与 `current_uses`，配合 `max_damage` 就能显示成一条耐久条。
+- **耗尽处置**：`depleted` 取 `"disable"`（锁死）/ `"vanish"`（消失）/ `"normal"`（变普通物品），缺省是 `disable`。
+- **伪耐久回复**：`recover: 1b` 打开，`recover_ticks` 控制每格回复需要多少刻（默认 10）。
+- **可丢弃**：`discardable: 1b`，冷却用 `discard_cooldown`（默认 60）。
+
+最快的学习路径是**照抄示例**：打开 `data/doom.consumable/loot_table/items/` 下任意一个
+`limited_*` / `infinite_*` 文件，改改里面的 id 和数字，就是一件你自己的物品了。
+
+另外两个现成的工具：
+
+- `/function doom.consumable:test/give_rod` —— 拿一把测试鱼竿；
+- `/function doom.consumable:test/probe_rod` —— 打印鱼竿相关的计分板与鱼漂状态，现场核对用。
+
+---
+
+## 仓库里有什么
+
+```
+pack.mcmeta                     版本声明（版本支持以它为准）
+README.md                       你正在看的这份（面向新手）
+CHANGELOG.md                    变更日志 —— 功能与版本的权威来源
+docs/
+  技术手册-物品契约与实现.md      完整技术手册（dc 契约 / API / 引擎事实）
+  技术档案-方块冷却闸门-20261001.md
+  实现链路-RecoveryHeart-20260928.md
+data/doom.consumable/
+  advancement/                  进度触发器（各条检测链的入口）
+  function/                     框架本体
+    api/                        对外 API：鱼竿、方块冷却、丢包回调…
+    block/                      方块冷却设备
+    core/                       快照与派发主干
+    recover/                    伪耐久条回复
+    restore/                    恢复落点守卫
+    rod/                        鱼竿接口
+    schedule/                   限次与日程
+    shot/                       射击链（弓 / 弩 / 三叉戟）
+    throw/                      投掷链（雪球 / 鸡蛋 / 末影珍珠 / 经验瓶）
+    test/                       调试与发放测试物品的函数
+  item_modifier/                物品改写（连发弹匣等）
+  loot_table/items/             全部示例物品定义
+  tags/                         回调标签（第三方挂载点）与物品/方块标签
+```
+
+---
+
+## 已知边界（诚实说明）
+
+- **Beta 阶段，格式会变**。上面那张 `dc` 字段表随时可能调整，请以 `docs/技术手册-物品契约与实现.md` 为准。
+- **方块交互没有「使用前」钩子**。方块冷却闸门只能做「冷却判定 + 回调」，
+  方块本身的行为（箱子开了、按钮按了）已经发生。要「根本按不动」，数据包层面做不到。
+- **补箭在背包满时会静默失败**，不会报错。
+- 鱼竿有一条边界：把鱼漂抛进**未加载的区块**时，归属标记会打空，
+  可能出现一次「抛竿后立刻收杆」的幻影（真人正常视距下不会遇到）。
+
+---
+
+## 许可
+
+见仓库根目录的 `LICENSE`。
