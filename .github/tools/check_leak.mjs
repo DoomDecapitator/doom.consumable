@@ -46,7 +46,9 @@ const SELF = ['.github/tools/check_leak.mjs'];
 
 // ② 顶层白名单
 const ALLOW = new Set(['README.md', 'LICENSE', 'CHANGELOG.md', '.gitignore', '.gitattributes',
-  'pack.mcmeta', 'data', 'dist', 'docs', '.github']);
+  'pack.mcmeta', 'data', 'dist', 'docs', '.github',
+  // 英文译本（与中文并列，不进发行包）
+  'README.en.md', 'CHANGELOG.en.md']);
 // 二进制/生成物跳过文本扫描
 const SKIP_EXT = /\.(zip|png|jpg|jpeg|gif|webp|ico|pdf|jar|dat|mca)$/i;
 

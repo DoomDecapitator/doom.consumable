@@ -1,4 +1,5 @@
 # Recovery Heart「耐久恢复」实现链路
+English: `docs/实现链路-RecoveryHeart-20260928.en.md`
 
 > 包：`packs/doom.consumable`（命名空间 `doom.consumable`）
 > 目标环境：Minecraft Java 1.21.6+ Fabric（项目定位见 `AGENTS.local.md:11`）
