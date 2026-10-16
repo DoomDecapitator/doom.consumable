@@ -74,7 +74,7 @@ item can be found under `data/doom.consumable/loot_table/items/`.
 1. **Prepare two packs.** This pack depends on `doom.library` (required); it is the shared base
    library that provides data reads and writes, and without it this pack cannot run:
    - `doom.consumable` (this pack)
-   - `doom.library` (<https://github.com/DoomDecapitator/doom.library>)
+   - `doom.library` (<https://github.com/Doom-Flare/doom.library>)
    - Optional: `doom.log`. With it installed, the framework's **concurrency self-check sentinel**
      reports an `E201` upwards when it finds a problem; you can play fine without it, those
      notices just have nowhere to go.

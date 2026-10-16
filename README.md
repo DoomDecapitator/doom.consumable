@@ -66,7 +66,7 @@
 1. **准备两个包**。本包依赖 `doom.library`（必需），它是提供数据读写的公共基础库，
    没有它本包跑不起来：
    - `doom.consumable`（本包）
-   - `doom.library`（<https://github.com/DoomDecapitator/doom.library>）
+   - `doom.library`（<https://github.com/Doom-Flare/doom.library>）
    - 可选：`doom.log`。装上它，框架的**并发自检哨兵**在发现问题时会向上报一条 `E201`；
      不装也能正常玩，只是这类提醒无处可去。
 
