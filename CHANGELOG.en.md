@@ -12,6 +12,24 @@
 
 ---
 
+## 2026-10-16 · v0.1.0-beta.3 — attribution and link tidy-up (repack, no behaviour change)
+
+**No behaviour change in this release**: all 212 files under `data/`, all 9 suites and 175 assertions are untouched.
+
+### 🧹 Dependency link in the packaged `README.md` now uses the new account
+
+**Symptom**: the line pointing at `doom.library` inside the packaged `README.md` still carried the old username
+(after the GitHub rename, bare repo links 301-redirect, but `github.com/<old-name>` profile URLs 404).
+
+**Fix**: that link now points at `Doom-Flare/doom.library`.
+
+### 📦 Repack
+
+`doom.consumable-v0.1.0-beta.3.zip` rebuilt per the release rules (216 entries, 216/216 byte-identical to the pack body),
+sha256 recomputed. The copyright line in `LICENSE` stays as-is by convention.
+
+---
+
 ## 2026-10-13 · v0.1.0-beta.2 —— new offline static gate + fix for a macro-line defect
 
 ### 🟢 B5 —— the last tellraw in `api/block_cd_config` is missing the `$` prefix

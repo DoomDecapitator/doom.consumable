@@ -1,1 +1,2 @@
+18ffdbe18755c44b25f9e703be17d08c583c7b45af7f7dad01c40618b715eac2  doom.consumable-v0.1.0-beta.3.zip
 94084cc77da45c0f07c6b95cea0a0b2f72fac09d9ec86fdddfd9c9a4e3d1dba3  doom.consumable-v0.1.0-beta.2.zip

@@ -25,7 +25,7 @@ const WRITE = process.argv.includes('--write');
 // zip ↔ 包体目录 的对应关系（包体 = 仓库根：白名单顶层文件 + data/**）
 const PACK_TOP_FILES = ['pack.mcmeta', 'README.md', 'LICENSE', 'CHANGELOG.md'];
 const PAIRS = [
-  ['doom.consumable-v0.1.0-beta.2.zip', ROOT],
+  ['doom.consumable-v0.1.0-beta.3.zip', ROOT],
 ];
 
 /* ---------- 最小 ZIP 读取器 ---------- */
